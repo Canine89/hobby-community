@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
 export async function GET(request: Request) {
   try {
@@ -12,19 +13,20 @@ export async function GET(request: Request) {
     const skip = (page - 1) * limit;
 
     // 검색 조건
-    const where = {
-      ...(board && {
-        board: {
-          slug: board,
-        },
-      }),
-      ...(q && {
-        OR: [
-          { title: { contains: q, mode: "insensitive" } },
-          { content: { contains: q, mode: "insensitive" } },
-        ],
-      }),
-    };
+    const where: Prisma.PostWhereInput = {};
+    
+    if (board) {
+      where.board = {
+        slug: board,
+      };
+    }
+    
+    if (q) {
+      where.OR = [
+        { title: { contains: q, mode: "insensitive" as const } },
+        { content: { contains: q, mode: "insensitive" as const } },
+      ];
+    }
 
     // 게시글 조회
     const [posts, totalPosts] = await Promise.all([
