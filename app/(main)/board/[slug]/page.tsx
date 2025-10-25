@@ -1,95 +1,136 @@
+"use client";
+
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
-import { auth } from "@/lib/auth";
+import { useParams, useSearchParams } from "next/navigation";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
 import { Eye, MessageSquare, ThumbsUp, ThumbsDown, Plus } from "lucide-react";
+import { useSession } from "next-auth/react";
 
-interface BoardPageProps {
-  params: Promise<{
-    slug: string;
+interface Board {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+}
+
+interface Post {
+  id: string;
+  title: string;
+  content: string;
+  views: number;
+  createdAt: string;
+  user: {
+    username: string;
+  };
+  _count: {
+    comments: number;
+    votes: number;
+  };
+  votes: Array<{
+    type: string;
   }>;
-  searchParams: Promise<{
-    page?: string;
-    q?: string;
-  }>;
+  upvotes: number;
+  downvotes: number;
+  score: number;
 }
 
 const POSTS_PER_PAGE = 20;
 
-export default async function BoardPage({ params, searchParams }: BoardPageProps) {
-  const session = await auth();
-  const resolvedParams = await params;
-  const resolvedSearchParams = await searchParams;
-  const page = Number(resolvedSearchParams.page) || 1;
-  const searchQuery = resolvedSearchParams.q || "";
+export default function BoardPage() {
+  const { data: session } = useSession();
+  const params = useParams();
+  const searchParams = useSearchParams();
+  const slug = params.slug as string;
+  const page = Number(searchParams.get("page")) || 1;
+  const searchQuery = searchParams.get("q") || "";
 
-  // 보드 확인
-  const board = await prisma.board.findUnique({
-    where: { slug: resolvedParams.slug },
-  });
+  const [board, setBoard] = useState<Board | null>(null);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [totalPosts, setTotalPosts] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
 
-  if (!board) {
-    redirect("/");
+  useEffect(() => {
+    const fetchBoardData = async () => {
+      try {
+        const response = await fetch(`/api/boards/${slug}`);
+        if (response.ok) {
+          const data = await response.json();
+          setBoard(data.board);
+        } else {
+          // 보드를 찾을 수 없으면 홈으로 리다이렉트
+          window.location.href = "/";
+          return;
+        }
+      } catch (error) {
+        console.error("Failed to fetch board:", error);
+        window.location.href = "/";
+      }
+    };
+
+    const fetchPosts = async () => {
+      try {
+        const response = await fetch(`/api/posts?board=${slug}&page=${page}&q=${searchQuery}`);
+        if (response.ok) {
+          const data = await response.json();
+          const postsWithStats = data.posts.map((post: any) => {
+            const upvotes = post.votes.filter((v: any) => v.type === "up").length;
+            const downvotes = post.votes.filter((v: any) => v.type === "down").length;
+            return {
+              ...post,
+              upvotes,
+              downvotes,
+              score: upvotes - downvotes,
+            };
+          });
+          setPosts(postsWithStats);
+          setTotalPosts(data.totalPosts);
+        }
+      } catch (error) {
+        console.error("Failed to fetch posts:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchBoardData();
+    fetchPosts();
+  }, [slug, page, searchQuery]);
+
+  if (isLoading) {
+    return (
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold">로딩 중...</h1>
+        </div>
+        <Card>
+          <CardContent className="py-12 text-center text-muted-foreground">
+            로딩 중...
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
-  // 게시글 검색 조건
-  const where = {
-    boardId: board.id,
-    ...(searchQuery && {
-      OR: [
-        { title: { contains: searchQuery } },
-        { content: { contains: searchQuery } },
-      ],
-    }),
-  };
+  if (!board) {
+    return (
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold">게시판을 찾을 수 없습니다</h1>
+        </div>
+        <Card>
+          <CardContent className="py-12 text-center text-muted-foreground">
+            요청하신 게시판을 찾을 수 없습니다.
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
-  // 전체 게시글 수
-  const totalPosts = await prisma.post.count({ where });
   const totalPages = Math.ceil(totalPosts / POSTS_PER_PAGE);
-
-  // 게시글 목록
-  const posts = await prisma.post.findMany({
-    where,
-    skip: (page - 1) * POSTS_PER_PAGE,
-    take: POSTS_PER_PAGE,
-    orderBy: {
-      createdAt: "desc",
-    },
-    include: {
-      user: {
-        select: {
-          username: true,
-        },
-      },
-      _count: {
-        select: {
-          comments: true,
-          votes: true,
-        },
-      },
-      votes: {
-        select: {
-          type: true,
-        },
-      },
-    },
-  });
-
-  // 게시글 통계 계산
-  const postsWithStats = posts.map((post) => {
-    const upvotes = post.votes.filter((v) => v.type === "up").length;
-    const downvotes = post.votes.filter((v) => v.type === "down").length;
-    return {
-      ...post,
-      upvotes,
-      downvotes,
-      score: upvotes - downvotes,
-    };
-  });
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -110,7 +151,7 @@ export default async function BoardPage({ params, searchParams }: BoardPageProps
         )}
       </div>
 
-      {postsWithStats.length === 0 ? (
+      {posts.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
             {searchQuery
@@ -121,7 +162,7 @@ export default async function BoardPage({ params, searchParams }: BoardPageProps
       ) : (
         <>
           <div className="space-y-4">
-            {postsWithStats.map((post) => (
+            {posts.map((post) => (
               <Card key={post.id} className="hover:shadow-md transition-shadow">
                 <CardHeader>
                   <div className="flex items-start justify-between gap-4">
@@ -177,7 +218,7 @@ export default async function BoardPage({ params, searchParams }: BoardPageProps
             <div className="flex justify-center gap-2">
               {page > 1 && (
                 <Button variant="outline" asChild>
-                  <Link href={`/board/${resolvedParams.slug}?page=${page - 1}`}>
+                  <Link href={`/board/${slug}?page=${page - 1}${searchQuery ? `&q=${searchQuery}` : ""}`}>
                     이전
                   </Link>
                 </Button>
@@ -201,7 +242,7 @@ export default async function BoardPage({ params, searchParams }: BoardPageProps
                       variant={page === pageNum ? "default" : "outline"}
                       asChild
                     >
-                      <Link href={`/board/${resolvedParams.slug}?page=${pageNum}`}>
+                      <Link href={`/board/${slug}?page=${pageNum}${searchQuery ? `&q=${searchQuery}` : ""}`}>
                         {pageNum}
                       </Link>
                     </Button>
@@ -210,7 +251,7 @@ export default async function BoardPage({ params, searchParams }: BoardPageProps
               </div>
               {page < totalPages && (
                 <Button variant="outline" asChild>
-                  <Link href={`/board/${resolvedParams.slug}?page=${page + 1}`}>
+                  <Link href={`/board/${slug}?page=${page + 1}${searchQuery ? `&q=${searchQuery}` : ""}`}>
                     다음
                   </Link>
                 </Button>

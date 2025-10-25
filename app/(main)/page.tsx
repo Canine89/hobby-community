@@ -1,62 +1,103 @@
+"use client";
+
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDistanceToNow } from "date-fns";
 import { ko } from "date-fns/locale";
-import { Eye, MessageSquare, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Eye, MessageSquare, ThumbsUp, ThumbsDown, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useSession } from "next-auth/react";
 
-export default async function HomePage() {
-  const posts = await prisma.post.findMany({
-    take: 20,
-    orderBy: {
-      createdAt: "desc",
-    },
-    include: {
-      user: {
-        select: {
-          username: true,
-        },
-      },
-      board: {
-        select: {
-          name: true,
-          slug: true,
-        },
-      },
-      _count: {
-        select: {
-          comments: true,
-          votes: true,
-        },
-      },
-      votes: {
-        select: {
-          type: true,
-        },
-      },
-    },
-  });
+interface Post {
+  id: string;
+  title: string;
+  content: string;
+  views: number;
+  createdAt: string;
+  user: {
+    username: string;
+  };
+  board: {
+    name: string;
+    slug: string;
+  };
+  _count: {
+    comments: number;
+    votes: number;
+  };
+  votes: Array<{
+    type: string;
+  }>;
+  upvotes: number;
+  downvotes: number;
+  score: number;
+}
 
-  // 게시글 통계 계산
-  const postsWithStats = posts.map((post) => {
-    const upvotes = post.votes.filter((v) => v.type === "up").length;
-    const downvotes = post.votes.filter((v) => v.type === "down").length;
-    return {
-      ...post,
-      upvotes,
-      downvotes,
-      score: upvotes - downvotes,
+export default function HomePage() {
+  const { data: session } = useSession();
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchPosts = async () => {
+      try {
+        const response = await fetch("/api/posts");
+        if (response.ok) {
+          const data = await response.json();
+          const postsWithStats = data.posts.map((post: any) => {
+            const upvotes = post.votes.filter((v: any) => v.type === "up").length;
+            const downvotes = post.votes.filter((v: any) => v.type === "down").length;
+            return {
+              ...post,
+              upvotes,
+              downvotes,
+              score: upvotes - downvotes,
+            };
+          });
+          setPosts(postsWithStats);
+        }
+      } catch (error) {
+        console.error("Failed to fetch posts:", error);
+      } finally {
+        setIsLoading(false);
+      }
     };
-  });
+
+    fetchPosts();
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold">최근 게시글</h1>
+        </div>
+        <Card>
+          <CardContent className="py-12 text-center text-muted-foreground">
+            로딩 중...
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">최근 게시글</h1>
+        {session && (
+          <Button asChild>
+            <Link href="/board/free/new">
+              <Plus className="h-4 w-4 mr-2" />
+              새 글 작성
+            </Link>
+          </Button>
+        )}
       </div>
 
-      {postsWithStats.length === 0 ? (
+      {posts.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
             아직 게시글이 없습니다. 첫 번째 게시글을 작성해보세요!
@@ -64,7 +105,7 @@ export default async function HomePage() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {postsWithStats.map((post) => (
+          {posts.map((post) => (
             <Card key={post.id} className="hover:shadow-md transition-shadow">
               <CardHeader>
                 <div className="flex items-start justify-between gap-4">

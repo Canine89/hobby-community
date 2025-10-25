@@ -2,43 +2,72 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const session = await auth();
+    const { searchParams } = new URL(request.url);
+    const board = searchParams.get("board");
+    const page = Number(searchParams.get("page")) || 1;
+    const q = searchParams.get("q") || "";
+    const limit = 20;
+    const skip = (page - 1) * limit;
 
-    if (!session || session.user.role !== "admin") {
-      return NextResponse.json(
-        { error: "권한이 없습니다" },
-        { status: 403 }
-      );
-    }
-
-    // 전체 게시글 조회 (관리자용)
-    const posts = await prisma.post.findMany({
-      orderBy: {
-        createdAt: "desc",
-      },
-      include: {
-        user: {
-          select: {
-            username: true,
-          },
-        },
+    // 검색 조건
+    const where = {
+      ...(board && {
         board: {
-          select: {
-            name: true,
-            slug: true,
-          },
+          slug: board,
         },
-        _count: {
-          select: {
-            comments: true,
-          },
-        },
-      },
-    });
+      }),
+      ...(q && {
+        OR: [
+          { title: { contains: q, mode: "insensitive" } },
+          { content: { contains: q, mode: "insensitive" } },
+        ],
+      }),
+    };
 
-    return NextResponse.json({ posts });
+    // 게시글 조회
+    const [posts, totalPosts] = await Promise.all([
+      prisma.post.findMany({
+        where,
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: limit,
+        skip,
+        include: {
+          user: {
+            select: {
+              username: true,
+            },
+          },
+          board: {
+            select: {
+              name: true,
+              slug: true,
+            },
+          },
+          _count: {
+            select: {
+              comments: true,
+            },
+          },
+          votes: {
+            select: {
+              type: true,
+            },
+          },
+        },
+      }),
+      prisma.post.count({ where }),
+    ]);
+
+    return NextResponse.json({ 
+      posts, 
+      totalPosts,
+      totalPages: Math.ceil(totalPosts / limit),
+      currentPage: page,
+    });
   } catch (error) {
     console.error("게시글 목록 조회 에러:", error);
     return NextResponse.json(
