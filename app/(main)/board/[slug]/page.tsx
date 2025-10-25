@@ -76,9 +76,18 @@ export default function BoardPage() {
         const response = await fetch(`/api/posts?board=${slug}&page=${page}&q=${searchQuery}`);
         if (response.ok) {
           const data = await response.json();
-          const postsWithStats = data.posts.map((post: any) => {
-            const upvotes = post.votes.filter((v: any) => v.type === "up").length;
-            const downvotes = post.votes.filter((v: any) => v.type === "down").length;
+          const postsWithStats = data.posts.map((post: {
+            id: string;
+            title: string;
+            content: string;
+            views: number;
+            createdAt: string;
+            user: { username: string };
+            _count: { comments: number; votes: number };
+            votes: Array<{ type: string }>;
+          }) => {
+            const upvotes = post.votes.filter((v: { type: string }) => v.type === "up").length;
+            const downvotes = post.votes.filter((v: { type: string }) => v.type === "down").length;
             return {
               ...post,
               upvotes,
